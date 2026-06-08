@@ -61,12 +61,12 @@ npm run dev
 ```js
 const BONE_NAMES = {
   j0: 'CS620-Base',            // 底座根骨骼Root（旋转 + XYZ 位移）
-  j1: 'CS620-J1',              // 底座旋转轴
-  j2: 'CS620-J2_Link1_J3',     // 大臂旋转
-  j3: 'CS620-Link2A_Link2B_J4',// 小臂旋转
-  j4: 'CS620-J5',              // 腕部旋转
-  j5: 'CS620-J6',              // 腕部旋转
-  j6: 'CS620-Flange',          // 末端执行器旋转
+  j1: 'CS620-J1',              // CS620-J1
+  j2: 'CS620-J2_Link1_J3',     // CS620-J2_Link1_J3
+  j3: 'CS620-Link2A_Link2B_J4',// CS620-Link2A_Link2B_J4
+  j4: 'CS620-J5',              // CS620-J5
+  j5: 'CS620-J6',              // CS620-J6
+  j6: 'CS620-Flange',          // CS620-Flange
 }
 ```
 
