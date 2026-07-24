@@ -1,405 +1,320 @@
 # 前端与后端数据接口约定
 
-> 本文档供 **后端开发人员** 阅读，说明前端 Three.js 三维可视化程序需要什么样的数据、按什么格式发送，以及如何与调试面板协作。
+> 版本: 1.0 · 日期: 2026-05-22 · 作者: 前端团队  
+> 本文档定义前端三维模型展示模块与桌面端程序（C# 上位机）之间的通信协议。  
+> **如有争议，以本文档为准。**
 
 ---
 
 ## 目录
 
-1. [整体架构](#1-整体架构)
-2. [通信方式：两种方案](#2-通信方式两种方案)
-3. [机械臂关节角度数据](#3-机械臂关节角度数据)
-4. [孔洞数据](#4-孔洞数据)
-5. [状态颜色约定](#5-状态颜色约定)
-6. [坐标系约定](#6-坐标系约定)
-7. [调试面板说明](#7-调试面板说明)
-8. [常见问题排查](#8-常见问题排查)
-9. [无后端时的测试方式](#9-无后端时的测试方式)
+- [1. 嵌入方案](#1-嵌入方案)
+- [2. 通信协议](#2-通信协议)
+- [3. 消息类型](#3-消息类型)
+  - [3.1 姿态消息 `pose`](#31-姿态消息-pose)
+  - [3.2 孔洞数据消息 `holes`](#32-孔洞数据消息-holes)
+  - [3.3 孔洞坐标消息 `addHoles`](#33-孔洞坐标消息-addholes)
+- [4. 字段参考](#4-字段参考)
+- [5. C# 调用示例](#5-c-调用示例)
+- [6. 搭建指引](#6-搭建指引)
+- [7. 变更记录](#7-变更记录)
 
 ---
 
-## 1. 整体架构
+## 1. 嵌入方案
 
-```
-第三方系统               后端 (你的代码)               前端 (Three.js)
-(Python/PLC)                                   ┌─────────────────────┐
-     │                                         │  App.vue            │
-     │  HTTP POST 或 其他协议                    │  └─ onCSharpMessage │
-     ├────────────────→  后端服务器              │       │             │
-     │                    ├─ 接收数据            │       ├─ "pose"     │
-     │                    ├─ 格式转换            │       │   → 骨骼动画 │
-     │                    └─ 推送给前端          │       ├─ "holes"    │
-     │                                         │       │   → 颜色更新  │
-     │                    ┌─ C# WebView2 ──────┤       └─ "addHoles"  │
-     │                    │ PostWebMessageAsString │         → 渲染新增  │
-     │                    └─────────────────────┘                     │
-     │                                         └─────────────────────┘
+桌面端通过 **Microsoft Edge WebView2** 控件加载前端页面。
+
+### 开发环境
+
+前端开发服务器启动在本机 **5173** 端口，WebView2 加载：
+
+```csharp
+webView.Source = new Uri("http://localhost:5173");
 ```
 
-### 前端接收数据的两种方式
+### 生产环境
 
-| 方式 | 适用场景 | 说明 |
-|------|---------|------|
-| **WebView2 Bridge** | 桌面客户端（WPF / WinForms 嵌入 WebView2） | C# 宿主调用 `PostWebMessageAsString()` 发送 JSON 字符串 |
-| **SignalR WebSocket** | 浏览器端 / 独立前端 | 前端直接连接后端 SignalR Hub |
+前端执行 `npm run build` 后产物在 `dist/` 目录，将整个目录拷贝到桌面端程序的资源路径下，WebView2 加载：
 
-两种方式最终都汇聚到前端的同一个入口函数，因此 **后端开发不需要关心前端用哪种方式接收**，只需确保送出的数据格式正确。
+```csharp
+string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "wwwroot", "dist", "index.html");
+webView.Source = new Uri($"file:///{path.Replace("\\", "/")}");
+```
+
+> **前置条件**：桌面端需要安装 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。
 
 ---
 
-## 2. 通信方式：两种方案
+## 2. 通信协议
 
-### 方案 A：通过 C# WebView2 Bridge（桌面客户端）
+### 方向
 
 ```
-后端服务器                  C# 宿主程序                   前端
-收到数据                                   (WebView2 内)
-    │                          │
-    │ SignalR / HTTP           │ PostWebMessageAsString(json)
-    ├────────────────→  C# 端 ───────────────────────────→  window.onCSharpMessage
-                         订阅 SignalR Hub
-                         接收数据后转发
+桌面端 (C#)  ──JSON──→  前端 (JS)
 ```
 
-C# 宿主应建立 SignalR 连接，监听以下事件，然后逐条转发给 WebView2。
+桌面端**主动推送**数据到前端，前端被动接收并渲染。通信方向为**单向**（C# → JS）。
 
-### 方案 B：前端直连 SignalR Hub（浏览器端）
+### 传输方式
 
-前端可以直接用 `@microsoft/signalr` 包连接后端 Hub：
+C# 端通过 WebView2 的 `PostWebMessageAsString` API 发送 JSON 字符串：
 
-```javascript
-import * as signalR from '@microsoft/signalr'
+```csharp
+webView.CoreWebView2.PostWebMessageAsString(json);
+```
 
-const connection = new signalR.HubConnectionBuilder()
-  .withUrl('http://localhost:5000/hub/arm')  // 后端地址
-  .withAutomaticReconnect()
-  .build()
+前端在 `window.onCSharpMessage` 函数中接收：
 
-connection.on('ArmPoseUpdate', (pose) => {
-  viewer.onArmPoseReceived(pose)
-})
+```js
+window.onCSharpMessage = (jsonStr) => {
+  const msg = JSON.parse(jsonStr)
+  // 根据 msg.type 分发到对应处理器
+}
+```
 
-connection.on('HoleDataUpdate', (holes) => {
-  viewer.onHoleDataReceived(holes)
-})
+### 通用格式
 
-connection.on('HolePositions', (holes) => {
-  viewer.addHoles(holes)
-})
+所有消息均为单行 JSON 对象，**必须**包含 `type` 字段：
 
-connection.start()
+```jsonc
+{
+  "type": "消息类型标识符",
+  // ... 消息特定字段
+}
 ```
 
 ---
 
-## 3. 机械臂关节角度数据
+## 3. 消息类型
 
-### 3.1 数据格式
+### 3.1 姿态消息 `pose`
+
+**用途：** 推送机械臂 7 轴关节旋转角度及底座位移。
+
+**推送频率：** ≥ 10 Hz（每秒至少 10 次）
+
+**JSON Schema：**
 
 ```json
 {
   "type": "pose",
-  "j0": 0.0,
-  "j1": 0.1,
-  "j2": 0.3,
-  "j3": 0.0,
-  "j4": 0.0,
-  "j5": 0.5,
-  "j6": 1.2,
+  "j0":  0.0,
+  "j1":  0.1,
+  "j2":  0.3,
+  "j3": -0.2,
+  "j4":  0.0,
+  "j5":  0.5,
+  "j6":  1.2,
   "j0x": 0.0,
   "j0y": 0.0,
   "j0z": 0.0
 }
 ```
 
-### 3.2 字段说明
-
-| 字段 | 类型 | 必需 | 单位 | 说明 |
+| 字段 | 类型 | 必须 | 单位 | 说明 |
 |------|------|------|------|------|
-| `type` | string | **是** | — | 固定值 `"pose"` |
-| `j0` | number | **是** | 弧度 | 底座旋转角度 |
-| `j1` | number | **是** | 弧度 | 关节 1 |
-| `j2` | number | **是** | 弧度 | 关节 2（大臂） |
-| `j3` | number | **是** | 弧度 | 关节 3（小臂） |
-| `j4` | number | **是** | 弧度 | 关节 4（腕部旋转） |
-| `j5` | number | **是** | 弧度 | 关节 5（腕部弯曲） |
-| `j6` | number | **是** | 弧度 | 关节 6（末端执行器） |
-| `j0x` | number | 否 | 米 | 底座 X 位移 |
-| `j0y` | number | 否 | 米 | 底座 Y 位移 |
-| `j0z` | number | 否 | 米 | 底座 Z 位移 |
+| `type` | string | ✅ | — | 固定值 `"pose"` |
+| `j0` | number | ✅ | 弧度 | 底座骨骼 (CS620-Base) 旋转 |
+| `j1` | number | ✅ | 弧度 | J1 关节旋转 |
+| `j2` | number | ✅ | 弧度 | J2 关节旋转 |
+| `j3` | number | ✅ | 弧度 | J3 关节旋转 |
+| `j4` | number | ✅ | 弧度 | J4 关节旋转 |
+| `j5` | number | ✅ | 弧度 | J5 关节旋转 |
+| `j6` | number | ✅ | 弧度 | J6 关节旋转（末端执行器） |
+| `j0x` | number | ❌ | 模型坐标 | 底座 X 位移 |
+| `j0y` | number | ❌ | 模型坐标 | 底座 Y 位移 |
+| `j0z` | number | ❌ | 模型坐标 | 底座 Z 位移 |
 
-> **单位速记**：所有 j0~j6 → 弧度，所有 j0x/j0y/j0z → 米。
-
-### 3.3 重要规定
-
-- **单位必须是弧度**，不是角度（度）。如果后端或 PLC 传的是角度，前端不会自动转换
-- **推送频率建议 ≥ 10 Hz**。太低会导致动画卡顿
-- **所有关节值每次都要全量发送**，即使某个关节值没有变化
-- 骨骼的正/反向由前端 `BONE_AXIS` 配置控制（由 3D 艺术家在 Blender 中调好），后端不需要关心
-
-### 3.4 前端的处理方式
-
-```
-收到 type:"pose" → onArmPoseReceived(pose)
-                    ├─ updatePose(pose)           → 驱动 Three.js 骨骼动画
-                    └─ Object.assign(jointForm, pose) → 同步调试面板显示
-```
+> ⚠️ **注意：** 关节角度单位为**弧度**，非角度。频率不足会导致模型运动卡顿，建议 20~50 Hz。
 
 ---
 
-## 4. 孔洞数据
+### 3.2 孔洞数据消息 `holes`
 
-前端用 InstancedMesh 批量渲染数百个孔洞，每个孔洞通过状态显示不同颜色，同时在右上角统计各状态数量。
+**用途：** 推送视觉算法检测完成的孔洞状态。
 
-### 4.1 消息类型 A：初始添加孔洞（含三维坐标）
-
-第一次加载时，或需要**重置所有孔洞**时使用。这个操作会**清除之前的所有孔洞再重建**。
-
-```json
-{
-  "type": "addHoles",
-  "data": [
-    { "id": "hole_001", "x": 0.12, "y": 0.45, "z": -0.03, "status": "pending" },
-    { "id": "hole_002", "x": 0.15, "y": 0.50, "z": -0.01, "status": "pending" },
-    { "id": "hole_003", "x": 0.09, "y": 0.48, "z": -0.05, "status": "pending" }
-  ]
-}
-```
-
-**`data[]` 每个元素字段**：
-
-| 字段 | 类型 | 必需 | 说明 |
-|------|------|------|------|
-| `id` | string | **是** | 孔洞唯一标识 |
-| `x` | number | **是** | 世界坐标系 X（米） |
-| `y` | number | **是** | 世界坐标系 Y（米） |
-| `z` | number | **是** | 世界坐标系 Z（米） |
-| `status` | string | 否 | 默认 `"pending"`。可选值见[第 5 节](#5-状态颜色约定) |
-
-### 4.2 消息类型 B：批量更新孔洞检测状态
-
-视觉算法每检测完一个孔洞，就会更新其状态。可一次性批量发送。
+**JSON Schema：**
 
 ```json
 {
   "type": "holes",
   "data": [
-    { "id": "hole_001", "status": "ok", "value": 0.05, "time": "2026-05-23 10:00:00", "imageId": "img_001" },
-    { "id": "hole_002", "status": "ng", "value": 0.15, "time": "2026-05-23 10:00:01", "imageId": "img_002" }
+    {
+      "id":      "hole_001",
+      "status":  "ok",
+      "value":   "0.123",
+      "time":    "2026-04-08 10:30:15",
+      "imageId": "IMG_20260408_001"
+    },
+    {
+      "id":      "hole_002",
+      "status":  "ng",
+      "value":   "2.456",
+      "time":    "2026-04-08 10:31:00",
+      "imageId": "IMG_20260408_002"
+    }
   ]
 }
 ```
 
-**`data[]` 每个元素字段**：
-
-| 字段 | 类型 | 必需 | 说明 |
+| 字段 | 类型 | 必须 | 说明 |
 |------|------|------|------|
-| `id` | string | **是** | 孔洞唯一标识，必须与 `addHoles` 中的 ID 一致 |
-| `status` | string | **是** | 新状态。可选值见[第 5 节](#5-状态颜色约定) |
-| `value` | string | 否 | 检测数值（如孔径、深度），显示在详情弹窗 |
-| `time` | string | 否 | 检测时间，显示在详情弹窗 |
-| `imageId` | string | 否 | 关联图像编号，显示在详情弹窗 |
+| `type` | string | ✅ | 固定值 `"holes"` |
+| `data` | array | ✅ | 孔洞状态列表 |
+| `data[].id` | string | ✅ | 孔洞唯一标识符 |
+| `data[].status` | string | ✅ | 检测结果（见状态表） |
+| `data[].value` | string | ❌ | 检测数值（如孔径、深度） |
+| `data[].time` | string | ❌ | 检测时间 |
+| `data[].imageId` | string | ❌ | 关联的内窥镜图像编号 |
 
-> 注意：`holes` 类型**只更新状态，不改变位置**。位置必须在之前通过 `addHoles` 传入。
+**状态值说明：**
 
-### 4.3 前端的处理方式
+| status | 渲染颜色 | 含义 |
+|--------|---------|------|
+| `ok` | 🟢 `#1D9E75` | 合格 |
+| `ng` | 🔴 `#D85A30` | 异常 |
+| `active` | 🟡 `#EF9F27` | 正在检测 |
+| `pending` | ⚪ `#888780` | 未检测（默认值） |
 
-```
-收到 type:"addHoles"
-  → viewer.value.addHoles(msg.data)
-    → tubeManager.addHoles(holes)
-      → 清除旧渲染器 → 重建 InstancedMesh → 更新右上角统计
-
-收到 type:"holes"
-  → viewer.value.onHoleDataReceived(msg.data)
-    → 遍历调用 tubeManager.setHoleStatus(id, status, meta)
-      → 更新颜色 → 更新右上角统计
-```
+> **注意：** `holes` 消息仅更新已有孔洞的状态和颜色。孔洞的三维坐标需要通过 `addHoles` 消息预先注册。
 
 ---
 
-## 5. 状态颜色约定
+### 3.3 孔洞坐标消息 `addHoles`
 
-| 状态值 | 颜色 | 色值 | 含义 | 统计面板显示 |
-|--------|------|------|------|-----------|
-| `"ok"` | 绿色 | `#1D9E75` | 合格（已检测） | 正常 |
-| `"ng"` | 红色 | `#D85A30` | 异常（已检测） | 异常 |
-| `"active"` | 黄色 | `#EF9F27` | 检测中 | 检测中 |
-| `"pending"` | 灰色 | `#888780` | 未检测（默认） | 未检测 |
+**用途：** 视觉算法完成标定后，一次性注册所有孔洞在世界坐标系中的三维位置。
 
----
+**JSON Schema：**
 
-## 6. 坐标系约定
-
-### 6.1 三维场景
-
-- 使用 **右手坐标系**（Y 轴向上）
-- 所有位置单位为 **米**
-- 孔洞的 `x, y, z` 为世界坐标系中的绝对位置
-
-### 6.2 关节角度
-
-- 所有角度单位均为 **弧度**（rad）
-- 角度正负遵循**右手螺旋定则**
-- 如果关节转向与实际相反，由 3D 艺术家在前端的 `BONE_AXIS` 配置中调整 `sign: 1` 或 `sign: -1`，**后端不需要处理**
-
-### 6.3 骨骼配置（仅 3D 艺术家关注）
-
-骨骼名称与关节的对应关系在 [useArmController.js](file:///g:/0_Robotic%20arm/Project%20code/composables/useArmController.js#L19-L26) 中配置，由 3D 艺术家根据 Blender 模型中的骨骼命名设置：
-
-```javascript
-const BONE_NAMES = {
-  j0: 'CS620-Base',             // 底座
-  j1: 'CS620-J1',               // 关节 1
-  j2: 'CS620-J2_Link1_J3',      // 关节 2（大臂）
-  j3: 'CS620-Link2A_Link2B_J4', // 关节 3（小臂）
-  j4: 'CS620-J5',               // 关节 4
-  j5: 'CS620-J6',               // 关节 5
-  j6: 'CS620-Flange',           // 关节 6（末端）
+```json
+{
+  "type": "addHoles",
+  "data": [
+    { "id": "hole_001", "x": 0.10, "y": 0.50, "z": 0.20 },
+    { "id": "hole_002", "x": 0.20, "y": 0.52, "z": 0.19 },
+    { "id": "hole_003", "x": 0.30, "y": 0.48, "z": 0.21 }
+  ]
 }
 ```
 
-后端传的 `j0` ~ `j6` 数据会按索引对应到这些骨骼。**后端只需要传正确的 j0~j6 值，不需要知道骨骼名称。**
+| 字段 | 类型 | 必须 | 单位 | 说明 |
+|------|------|------|------|------|
+| `type` | string | ✅ | — | 固定值 `"addHoles"` |
+| `data` | array | ✅ | — | 孔洞坐标列表 |
+| `data[].id` | string | ✅ | — | 孔洞唯一标识符 |
+| `data[].x` | number | ✅ | 模型坐标 | X 轴位置 |
+| `data[].y` | number | ✅ | 模型坐标 | Y 轴位置 |
+| `data[].z` | number | ✅ | 模型坐标 | Z 轴位置 |
+
+> **调用顺序：** 先调用 `addHoles` 注册孔洞位置，后续通过 `holes` 消息更新各孔洞的检测状态。
 
 ---
 
-## 7. 调试面板说明
+## 4. 字段参考
 
-前端内置了调试面板（[DebugPanel.vue](file:///g:/0_Robotic%20arm/Project%20code/src/components/DebugPanel.vue)），供开发调试使用。
+### 坐标系单位
 
-### 7.1 手动控制模式
+| 类别 | 单位 | 说明 |
+|------|------|------|
+| 关节旋转 | 弧度 (rad) | 1 rad ≈ 57.3°。桌面端如果使用角度，发送前需用 `角度 × π ÷ 180` 转换 |
+| 位移 / 坐标 | 模型坐标系单位 (m) | 与 Blender glTF 导出单位一致 |
 
-当后端未连接时，可以通过调试面板手动输入关节角度驱动机械臂动画。输入后点击"应用"即可。
+### 错误处理
 
-### 7.2 实时数据回显
+前端接收到消息后，如果 JSON 解析失败，会在浏览器控制台打印：
 
-当后端通过 SignalR 推送数据时，调试面板的关节输入框会自动回显后端发送的值。**调试面板与后端数据始终同步。**
-
-### 7.3 调试孔洞
-
-调试面板可在 J6 末端位置手动添加孔洞圆柱体，用于验证孔洞位置是否准确。调试孔洞会进入统一的统计系统，与真实孔洞一样在右上角显示统计数字。
-
-### 7.4 对后端开发的价值
-
-调试面板让后端开发者在**完全没有前端代码修改**的情况下就能验证：
-- 后端推送的数据是否被前端正确接收
-- 关节角度数据是否合理
-- 孔洞位置和状态是否正确渲染
-
----
-
-## 8. 常见问题排查
-
-### 问题 1：机械臂不动
-
-| 排查步骤 | 说明 |
-|---------|------|
-| 检查消息 `type` 是否为 `"pose"` | 其他字段会被忽略 |
-| 检查角度单位是否为弧度 | 如果是角度，数值会非常大或非常小 |
-| 检查骨骼名称是否匹配 | 3D 艺术家需要确认 Blender 骨骼名与 `BONE_NAMES` 一致 |
-| 在调试面板查看关节值是否回显 | 如果回显了，说明前端接收成功；不回显说明消息格式有问题 |
-
-### 问题 2：孔洞不显示
-
-| 排查步骤 | 说明 |
-|---------|------|
-| 检查消息 `type` 是否为 `"addHoles"` | |
-| 检查 `id` 是否唯一 | 重复 ID 会覆盖前一个 |
-| 检查坐标是否在场景可视范围内 | 坐标超出相机视野范围 |
-| 检查统计面板数字是否有变化 | 如果统计数字增加但不显示，说明坐标位置不对 |
-
-### 问题 3：孔洞颜色不对
-
-| 排查步骤 | 说明 |
-|---------|------|
-| 检查 `status` 值是否拼写正确 | 必须是 `"ok"` / `"ng"` / `"active"` / `"pending"` |
-| 大小写敏感 | 必须小写 |
-
-### 问题 4：WebView2 Bridge 连接失败
-
-| 排查步骤 | 说明 |
-|---------|------|
-| 检查 `window.onCSharpMessage` 是否被调用 | 可在浏览器 DevTools Console 中查看 |
-| 检查 JSON 是否合法 | 可使用 `JSON.parse()` 测试 |
-| 检查 C# 端是否调用了 `PostWebMessageAsString` | |
-
----
-
-## 9. 无后端时的测试方式
-
-在新后端开发完成前，可以用以下方式测试前端：
-
-### 9.1 使用浏览器 DevTools 手动模拟
-
-打开前端页面（`http://localhost:5173/`），在浏览器控制台执行：
-
-```javascript
-// 驱动机械臂运动
-window.onCSharpMessage(JSON.stringify({
-  type: "pose",
-  j0: 0, j1: 0.5, j2: -0.3, j3: 0.2, j4: 0, j5: 0, j6: 0
-}))
-
-// 添加孔洞
-window.onCSharpMessage(JSON.stringify({
-  type: "addHoles",
-  data: [
-    { id: "test_001", x: 0.1, y: 0.5, z: 0.2, status: "pending" },
-    { id: "test_002", x: 0.2, y: 0.5, z: 0.2, status: "ok" },
-    { id: "test_003", x: 0.3, y: 0.5, z: 0.2, status: "ng" }
-  ]
-}))
-
-// 更新孔洞状态
-window.onCSharpMessage(JSON.stringify({
-  type: "holes",
-  data: [
-    { id: "test_001", status: "active" },
-    { id: "test_002", status: "ok" }
-  ]
-}))
+```
+[Bridge] 消息解析失败: <错误详情>
 ```
 
-### 9.2 使用前端调试面板
+桌面端应将此异常的捕获列入调试用例：如果反复出现此日志，说明发送的 JSON 格式有误。
 
-前端内置的调试面板提供完整的手动控制功能：
-- **关节控制**：手动输入每个关节的角度，驱动骨骼动画
-- **J6 笛卡尔坐标**：实时显示末端执行器的世界坐标和欧拉角
-- **孔洞调试**：在末端位置手动添加测试孔洞，自定义尺寸/颜色
+---
 
-调试面板的数据流与后端推送的数据流**完全一致**，均经过同一套处理逻辑。
+## 5. C# 调用示例
 
-### 9.3 使用 Postman / curl 模拟后端
+```csharp
+using System.Text.Json;
 
-启动后端项目后，可以用以下命令测试：
+public static class FrontendBridge
+{
+    /// <summary>
+    /// 推送机械臂关节姿态（频率 ≥10 Hz）
+    /// </summary>
+    public static void SendPose(WebView2 webView, double j0, double j1, double j2,
+        double j3, double j4, double j5, double j6,
+        double j0x = 0, double j0y = 0, double j0z = 0)
+    {
+        var payload = new
+        {
+            type = "pose",
+            j0, j1, j2, j3, j4, j5, j6, j0x, j0y, j0z
+        };
+        webView.CoreWebView2.PostWebMessageAsString(
+            JsonSerializer.Serialize(payload));
+    }
+
+    /// <summary>
+    /// 推送孔洞检测状态
+    /// </summary>
+    public static void SendHoleStatus(WebView2 webView, List<HoleResult> results)
+    {
+        var payload = new { type = "holes", data = results };
+        webView.CoreWebView2.PostWebMessageAsString(
+            JsonSerializer.Serialize(payload));
+    }
+
+    /// <summary>
+    /// 注册孔洞三维坐标
+    /// </summary>
+    public static void SendHolePositions(WebView2 webView, List<HolePosition> positions)
+    {
+        var payload = new { type = "addHoles", data = positions };
+        webView.CoreWebView2.PostWebMessageAsString(
+            JsonSerializer.Serialize(payload));
+    }
+}
+
+public record HoleResult(string Id, string Status,
+    string? Value, string? Time, string? ImageId);
+
+public record HolePosition(string Id, double X, double Y, double Z);
+```
+
+---
+
+## 6. 搭建指引
+
+### 桌面端开发者
 
 ```bash
-# 推送关节角度
-curl -X POST http://localhost:5000/api/pose \
-  -H "Content-Type: application/json" \
-  -d '{"j1":0.1,"j2":0.3,"j3":0.0,"j4":0.0,"j5":0.5,"j6":1.2}'
+# 1. 克隆/下载整个 Project code 目录
+# 2. 安装依赖（首次）
+cd "Project code 所在目录"
+npm install
 
-# 推送孔洞数据
-curl -X POST http://localhost:5000/api/hole \
-  -H "Content-Type: application/json" \
-  -d '{"type":"holes","data":[{"id":"hole_001","status":"ok","value":"0.123"}]}'
+# 3. 启动开发服务器
+npm run dev
+
+# 4. WebView2 加载 http://localhost:5173
 ```
 
+### 后端 API 路径（可选）
+
+如不使用 WebView2 桥接，也可通过 .NET 8 后端 API + SignalR 通信：
+
+```bash
+cd "Back-end Test"
+dotnet run
+```
+
+详见 [Back-end Test/README.md](Back-end%20Test/README.md)。
+
 ---
 
-## 附录：前端关键文件说明
+## 7. 变更记录
 
-| 文件 | 作用 |
-|------|------|
-| [App.vue](file:///g:/0_Robotic%20arm/Project%20code/src/App.vue) | 消息总入口：`window.onCSharpMessage` |
-| [RobotViewer.vue](file:///g:/0_Robotic%20arm/Project%20code/src/components/RobotViewer.vue) | 主视图组件，暴露 `onArmPoseReceived` / `onHoleDataReceived` / `addHoles` |
-| [useArmController.js](file:///g:/0_Robotic%20arm/Project%20code/composables/useArmController.js) | 机械臂骨骼驱动逻辑，配置骨骼名称与旋转轴 |
-| [useTubeManager.js](file:///g:/0_Robotic%20arm/Project%20code/composables/useTubeManager.js) | 孔洞渲染与统计管理 |
-| [DebugPanel.vue](file:///g:/0_Robotic%20arm/Project%20code/src/components/DebugPanel.vue) | 调试面板 UI |
-
----
-
-> **给后端开发的一句话总结**：
-> 前端只认三种消息（`pose` / `holes` / `addHoles`），格式固定为 JSON，单位用弧度/米。
-> 只要按本文档约定的格式发送数据，前端就能正确驱动机械臂动画和孔洞渲染。
-> 调试面板可以作为后端数据是否正确送达的实时指示器。
+| 版本 | 日期 | 变更内容 |
+|------|------|---------|
+| 1.0 | 2026-05-22 | 初版：定义 pose / holes / addHoles 三种消息类型；嵌入方案说明；C# 调用示例 |
