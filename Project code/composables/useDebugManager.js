@@ -13,7 +13,7 @@
 import { ref, reactive, shallowRef } from 'vue'
 import * as THREE from 'three'
 
-export function useDebugManager(sceneRef, armCtrl, tubeManager) {
+export function useDebugManager(sceneRef, armCtrl) {
   // ═════════════════════════════════════════════════════════════════
   // 调试面板开关
   // ═════════════════════════════════════════════════════════════════
@@ -348,66 +348,6 @@ export function useDebugManager(sceneRef, armCtrl, tubeManager) {
   }
 
   // ═════════════════════════════════════════════════════════════════
-  // 需求 3 — 调试孔洞圆柱体（通过 tubeManager 统一管理）
-  // ═════════════════════════════════════════════════════════════════
-  const debugHoles    = shallowRef([])
-  const _debugHoleIds = []
-  let _debugCounter   = 0
-
-  const holeForm    = reactive({
-    offsetX: 0, offsetY: -0.129, offsetZ: 0,
-    height: 0.05, diameter: 0.3,
-    status: 'pending',
-    colorHex: '#888780',
-  })
-
-  const STATUS_COLOR_MAP = {
-    ok:      '#1D9E75',
-    ng:      '#D85A30',
-    active:  '#EF9F27',
-    pending: '#888780',
-  }
-
-  function syncColorFromStatus() {
-    if (STATUS_COLOR_MAP[holeForm.status]) {
-      holeForm.colorHex = STATUS_COLOR_MAP[holeForm.status]
-    }
-  }
-
-  function addDebugHole() {
-    const j6 = armCtrl.j6Cartesian?.value
-    if (!j6 || !tubeManager) return
-    const id = `debug_${Date.now()}_${_debugCounter++}`
-    tubeManager.appendHoles([{
-      id,
-      x: j6.x + holeForm.offsetX,
-      y: j6.y + holeForm.offsetY,
-      z: j6.z + holeForm.offsetZ,
-      status: holeForm.status,
-      _custom: true,
-      _radius: Math.max(holeForm.diameter / 2, 0.001),
-      _height: holeForm.height || 0.01,
-      _color: holeForm.colorHex,
-    }])
-    _debugHoleIds.push(id)
-    debugHoles.value = [..._debugHoleIds]
-  }
-
-  function removeLastHole() {
-    if (_debugHoleIds.length === 0) return
-    const id = _debugHoleIds.pop()
-    tubeManager.removeHoles([id])
-    debugHoles.value = [..._debugHoleIds]
-  }
-
-  function clearAllHoles() {
-    if (_debugHoleIds.length === 0) return
-    tubeManager.removeHoles(_debugHoleIds)
-    _debugHoleIds.length = 0
-    debugHoles.value = []
-  }
-
-  // ═════════════════════════════════════════════════════════════════
   // 生命周期清理（组件卸载时调用）
   // ═════════════════════════════════════════════════════════════════
   function dispose() {
@@ -415,7 +355,6 @@ export function useDebugManager(sceneRef, armCtrl, tubeManager) {
     _destroyWorldAxes()
     _destroyBoneVisuals()
     _destroyBoneJoints()
-    clearAllHoles()
   }
 
   return {
@@ -432,10 +371,6 @@ export function useDebugManager(sceneRef, armCtrl, tubeManager) {
     applyJointForm, addJointAngle, resetJointForm,
     // J6 笛卡尔坐标
     j6Cartesian: armCtrl.j6Cartesian,
-    // 孔洞调试
-    debugHoles, holeForm,
-    syncColorFromStatus,
-    addDebugHole, removeLastHole, clearAllHoles,
     // 生命周期
     dispose,
   }

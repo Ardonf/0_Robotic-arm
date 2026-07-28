@@ -100,40 +100,6 @@
             </div>
           </fieldset>
 
-          <!-- ══════════════════ 孔洞调试 ═══════════════════ -->
-          <fieldset class="panel-section">
-            <legend>孔洞调试</legend>
-            <div class="hole-form">
-              <div class="hole-form-row">
-                <label>偏移X<input type="number" step="0.01" v-model.number="debug.holeForm.offsetX"></label>
-                <label>偏移Y<input type="number" step="0.01" v-model.number="debug.holeForm.offsetY"></label>
-                <label>偏移Z<input type="number" step="0.01" v-model.number="debug.holeForm.offsetZ"></label>
-              </div>
-              <div class="hole-form-row">
-                <label>高度<input type="number" step="0.001" v-model.number="debug.holeForm.height"></label>
-                <label>直径<input type="number" step="0.001" v-model.number="debug.holeForm.diameter"></label>
-              </div>
-              <div class="hole-form-row">
-                <label>状态
-                  <select v-model="debug.holeForm.status" @change="debug.syncColorFromStatus()">
-                    <option value="ok">合格(绿)</option>
-                    <option value="ng">异常(红)</option>
-                    <option value="active">检测中(黄)</option>
-                    <option value="pending">未检测(灰)</option>
-                  </select>
-                </label>
-                <label>颜色<input type="color" v-model="debug.holeForm.colorHex">
-                  <code class="hex-display">{{ debug.holeForm.colorHex }}</code>
-                </label>
-              </div>
-              <div class="hole-actions">
-                <button class="btn-sm btn-add" @click="debug.addDebugHole()">添加孔洞</button>
-                <button class="btn-sm" @click="debug.removeLastHole()" :disabled="!debug.debugHoles.value.length">撤回</button>
-                <button class="btn-sm btn-clear" @click="debug.clearAllHoles()" :disabled="!debug.debugHoles.value.length">清除 ({{ debug.debugHoles.value.length }})</button>
-              </div>
-            </div>
-          </fieldset>
-
         </div>
       </div>
     </Transition>
@@ -399,10 +365,6 @@ onUnmounted(() => {
 .btn-sm:hover { background: rgba(255,255,255,0.12); color: #ccc; }
 .btn-reset { color: #D85A30; border-color: #3a1a1a; }
 .btn-reset:hover { background: rgba(216,90,48,0.15); }
-.btn-add { color: #1D9E75; border-color: #1a3a2a; }
-.btn-add:hover { background: rgba(29,158,117,0.15); }
-.btn-clear { color: #D85A30; border-color: #3a1a1a; }
-.btn-sm:disabled { opacity: 0.35; cursor: default; }
 
 /* ── J6 笛卡尔坐标 ──────────────────────────────────────────────── */
 .cartesian-grid {
@@ -421,43 +383,6 @@ onUnmounted(() => {
 .cart-label { font-size: 11px; color: #555; }
 .cart-val { font-size: 12px; color: #ccc; font-family: 'Consolas', monospace; }
 .cart-note { font-size: 9px; color: #444; margin-top: 4px; }
-
-/* ── 孔洞表单 ────────────────────────────────────────────────────── */
-.hole-form { display: flex; flex-direction: column; gap: 6px; }
-.hole-form-row {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.hole-form-row label {
-  font-size: 10px;
-  color: #777;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.hole-form-row input[type="number"],
-.hole-form-row select {
-  width: 66px;
-  background: #111;
-  border: 0.5px solid #333;
-  border-radius: 4px;
-  color: #ccc;
-  font-size: 11px;
-  padding: 3px 5px;
-  font-family: 'Consolas', monospace;
-}
-.hole-form-row input[type="color"] {
-  width: 36px;
-  height: 22px;
-  border: 0.5px solid #333;
-  border-radius: 3px;
-  background: none;
-  cursor: pointer;
-  padding: 0;
-}
-.hex-display { font-size: 10px; color: #aaa; margin-left: 2px; }
-.hole-actions { display: flex; gap: 8px; margin-top: 4px; }
 
 /* ── 折叠切换条 ──────────────────────────────────────────────────── */
 .debug-toggle {

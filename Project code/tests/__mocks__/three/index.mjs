@@ -1,5 +1,5 @@
 /**
- * Minimal mock of THREE.js — 仅模拟 useArmController / useTubeManager 使用的 API
+ * Minimal mock of THREE.js — 仅模拟 useArmController 使用的 API
  */
 
 export const DynamicDrawUsage = 35048

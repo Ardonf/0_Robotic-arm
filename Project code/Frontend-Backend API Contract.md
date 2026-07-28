@@ -1,6 +1,6 @@
 # 前端与后端数据接口约定
 
-> 版本: 1.0 · 日期: 2026-05-22 · 作者: 前端团队  
+> 版本: 1.1 · 日期: 2026-05-22 · 作者: 前端团队  
 > 本文档定义前端三维模型展示模块与桌面端程序（C# 上位机）之间的通信协议。  
 > **如有争议，以本文档为准。**
 
@@ -12,8 +12,6 @@
 - [2. 通信协议](#2-通信协议)
 - [3. 消息类型](#3-消息类型)
   - [3.1 姿态消息 `pose`](#31-姿态消息-pose)
-  - [3.2 孔洞数据消息 `holes`](#32-孔洞数据消息-holes)
-  - [3.3 孔洞坐标消息 `addHoles`](#33-孔洞坐标消息-addholes)
 - [4. 字段参考](#4-字段参考)
 - [5. C# 调用示例](#5-c-调用示例)
 - [6. 搭建指引](#6-搭建指引)
@@ -23,7 +21,11 @@
 
 ## 1. 嵌入方案
 
-桌面端通过 **Microsoft Edge WebView2** 控件加载前端页面。
+桌面端通过以下任一方式与前端通信，**两种方式可同时启用**：
+
+### 方式 A：WebView2 桥接（嵌入式）
+
+通过 **Microsoft Edge WebView2** 控件加载前端页面。
 
 ### 开发环境
 
@@ -43,6 +45,19 @@ webView.Source = new Uri($"file:///{path.Replace("\\", "/")}");
 ```
 
 > **前置条件**：桌面端需要安装 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。
+
+### 方式 B：SignalR WebSocket（远程 API）
+
+对于需要前后端分离部署的场景，可通过 .NET 8 后端 API + SignalR 通信：
+
+```bash
+cd "Back-end Test"
+dotnet run   # 启动后端，默认 http://localhost:5000
+```
+
+前端启动后会自动连接 `http://localhost:5000/hub/arm`。
+
+数据流：`PLC → HTTP POST → .NET 8 API → SignalR → 前端`
 
 ---
 
@@ -130,87 +145,6 @@ window.onCSharpMessage = (jsonStr) => {
 
 ---
 
-### 3.2 孔洞数据消息 `holes`
-
-**用途：** 推送视觉算法检测完成的孔洞状态。
-
-**JSON Schema：**
-
-```json
-{
-  "type": "holes",
-  "data": [
-    {
-      "id":      "hole_001",
-      "status":  "ok",
-      "value":   "0.123",
-      "time":    "2026-04-08 10:30:15",
-      "imageId": "IMG_20260408_001"
-    },
-    {
-      "id":      "hole_002",
-      "status":  "ng",
-      "value":   "2.456",
-      "time":    "2026-04-08 10:31:00",
-      "imageId": "IMG_20260408_002"
-    }
-  ]
-}
-```
-
-| 字段 | 类型 | 必须 | 说明 |
-|------|------|------|------|
-| `type` | string | ✅ | 固定值 `"holes"` |
-| `data` | array | ✅ | 孔洞状态列表 |
-| `data[].id` | string | ✅ | 孔洞唯一标识符 |
-| `data[].status` | string | ✅ | 检测结果（见状态表） |
-| `data[].value` | string | ❌ | 检测数值（如孔径、深度） |
-| `data[].time` | string | ❌ | 检测时间 |
-| `data[].imageId` | string | ❌ | 关联的内窥镜图像编号 |
-
-**状态值说明：**
-
-| status | 渲染颜色 | 含义 |
-|--------|---------|------|
-| `ok` | 🟢 `#1D9E75` | 合格 |
-| `ng` | 🔴 `#D85A30` | 异常 |
-| `active` | 🟡 `#EF9F27` | 正在检测 |
-| `pending` | ⚪ `#888780` | 未检测（默认值） |
-
-> **注意：** `holes` 消息仅更新已有孔洞的状态和颜色。孔洞的三维坐标需要通过 `addHoles` 消息预先注册。
-
----
-
-### 3.3 孔洞坐标消息 `addHoles`
-
-**用途：** 视觉算法完成标定后，一次性注册所有孔洞在世界坐标系中的三维位置。
-
-**JSON Schema：**
-
-```json
-{
-  "type": "addHoles",
-  "data": [
-    { "id": "hole_001", "x": 0.10, "y": 0.50, "z": 0.20 },
-    { "id": "hole_002", "x": 0.20, "y": 0.52, "z": 0.19 },
-    { "id": "hole_003", "x": 0.30, "y": 0.48, "z": 0.21 }
-  ]
-}
-```
-
-| 字段 | 类型 | 必须 | 单位 | 说明 |
-|------|------|------|------|------|
-| `type` | string | ✅ | — | 固定值 `"addHoles"` |
-| `data` | array | ✅ | — | 孔洞坐标列表 |
-| `data[].id` | string | ✅ | — | 孔洞唯一标识符 |
-| `data[].x` | number | ✅ | 模型坐标 | X 轴位置 |
-| `data[].y` | number | ✅ | 模型坐标 | Y 轴位置 |
-| `data[].z` | number | ✅ | 模型坐标 | Z 轴位置 |
-
-> **调用顺序：** 先调用 `addHoles` 注册孔洞位置，后续通过 `holes` 消息更新各孔洞的检测状态。
-
----
-
 ## 4. 字段参考
 
 ### 坐标系单位
@@ -242,7 +176,8 @@ public static class FrontendBridge
     /// <summary>
     /// 推送机械臂关节姿态（频率 ≥10 Hz）
     /// </summary>
-    public static void SendPose(WebView2 webView, double j0, double j1, double j2,
+    public static void SendPose(WebView2 webView,
+        double j0, double j1, double j2,
         double j3, double j4, double j5, double j6,
         double j0x = 0, double j0y = 0, double j0z = 0)
     {
@@ -254,32 +189,7 @@ public static class FrontendBridge
         webView.CoreWebView2.PostWebMessageAsString(
             JsonSerializer.Serialize(payload));
     }
-
-    /// <summary>
-    /// 推送孔洞检测状态
-    /// </summary>
-    public static void SendHoleStatus(WebView2 webView, List<HoleResult> results)
-    {
-        var payload = new { type = "holes", data = results };
-        webView.CoreWebView2.PostWebMessageAsString(
-            JsonSerializer.Serialize(payload));
-    }
-
-    /// <summary>
-    /// 注册孔洞三维坐标
-    /// </summary>
-    public static void SendHolePositions(WebView2 webView, List<HolePosition> positions)
-    {
-        var payload = new { type = "addHoles", data = positions };
-        webView.CoreWebView2.PostWebMessageAsString(
-            JsonSerializer.Serialize(payload));
-    }
 }
-
-public record HoleResult(string Id, string Status,
-    string? Value, string? Time, string? ImageId);
-
-public record HolePosition(string Id, double X, double Y, double Z);
 ```
 
 ---
@@ -289,7 +199,7 @@ public record HolePosition(string Id, double X, double Y, double Z);
 ### 桌面端开发者
 
 ```bash
-# 1. 克隆/下载整个 Project code 目录
+# 1. 下载整个 Project code 目录
 # 2. 安装依赖（首次）
 cd "Project code 所在目录"
 npm install
@@ -317,4 +227,6 @@ dotnet run
 
 | 版本 | 日期 | 变更内容 |
 |------|------|---------|
+| 1.2 | 2026-05-22 | 新增 SignalR WebSocket 接入方式（方式 B）；两种方式可并存 |
+| 1.1 | 2026-05-22 | 移除孔洞消息类型（holes / addHoles），精简为纯姿态通信 |
 | 1.0 | 2026-05-22 | 初版：定义 pose / holes / addHoles 三种消息类型；嵌入方案说明；C# 调用示例 |

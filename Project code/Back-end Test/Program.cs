@@ -46,7 +46,6 @@ Console.WriteLine($"║           Hub 端点: {url}/hub/arm            ║");
 Console.WriteLine("║                                                            ║");
 Console.WriteLine("║  可用接口:                                                  ║");
 Console.WriteLine($"║    POST {url}/api/pose   ← 机械臂关节坐标                   ║");
-Console.WriteLine($"║    POST {url}/api/hole   ← 孔洞数据                         ║");
 Console.WriteLine("║                                                            ║");
 Console.WriteLine("╚══════════════════════════════════════════════════════════════╝");
 

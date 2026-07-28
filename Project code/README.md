@@ -19,13 +19,11 @@ Project code/
 │       └── DebugPanel.vue      ← 调试面板组件（上线可隐藏）
 ├── composables/
 │   ├── useSceneManager.js      ← Three.js 场景初始化
-│   ├── useArmController.js     ← 机械臂骨骼驱动
-│   ├── useTubeManager.js       ← 孔洞 InstancedMesh 管理
-│   ├── useRaycaster.js         ← 鼠标点击拾取
+│   ├── useArmController.js     ← 机械臂骨骼驱动 ⚠️ 需改骨骼名
+│   ├── useSignalR.js           ← SignalR 后端连接
 │   └── useDebugManager.js      ← 调试面板状态与逻辑
 ├── tests/
 │   ├── useArmController.test.js
-│   ├── useTubeManager.test.js
 │   └── __mocks__/              ← THREE.js 轻量 mock
 ├── Back-end Test/              ← .NET 8 后端服务（详见其内部 README.md）
 └── dist/                       ← 生产构建产物
@@ -94,41 +92,49 @@ const BONE_NAMES = {
 
 ---
 
-## 孔洞数据对接
+## 机械臂关节对接
 
-视觉算法识别到孔洞后，调用组件暴露的方法：
+前端支持两种通信方式，**可同时启用，互不冲突**。
 
-```js
-// 1. 添加所有孔洞（一次性，坐标来自视觉算法）
-viewer.addHoles([
-  { id: 'hole_001', x: 0.1, y: 0.5, z: 0.2 },
-  { id: 'hole_002', x: 0.2, y: 0.5, z: 0.2 },
-  // ...
-])
+### 方式 A：WebView2 桥接（嵌入式）
 
-// 2. 更新孔洞状态（检测结果返回后调用）
-viewer.onHoleDataReceived([
-  { id: 'hole_001', status: 'ok', value: '0.123', time: '2026-04-08 10:30', imageId: 'IMG_001' },
-  { id: 'hole_002', status: 'ng', value: '2.456', time: '2026-04-08 10:31', imageId: 'IMG_002' },
-])
+C# 端通过 `PostWebMessageAsString` 发送 JSON：
+
+```csharp
+webView.CoreWebView2.PostWebMessageAsString(
+  JsonSerializer.Serialize(new {
+    type = "pose",
+    j0 = 0.0, j1 = 0.1, j2 = 0.3, j3 = 0.0,
+    j4 = 0.0, j5 = 0.0, j6 = 0.0,
+    j0x = 0.0, j0y = 0.0, j0z = 0.0
+  })
+);
 ```
 
-状态值说明：
-| status | 颜色 | 含义 |
-|--------|------|------|
-| `ok`      | 绿 | 检测正常 |
-| `ng`      | 红 | 检测异常 |
-| `active`  | 黄 | 正在检测 |
-| `pending` | 灰 | 未检测（默认） |
+前端接收入口在 [App.vue](src/App.vue) 的 `window.onCSharpMessage` 中配置。
 
----
+### 方式 B：SignalR WebSocket（远程 API）
 
-## 机械臂关节对接（SignalR）
+数据流：`PLC → HTTP POST → .NET 8 API → SignalR → 前端`
 
-程序员通过 SignalR 推送关节角度后，调用：
+```bash
+# 先启动后端
+cd "Back-end Test"
+dotnet run
+```
+
+然后启动前端 `npm run dev`，前端会自动连接后端 SignalR Hub。
+
+> 如果后端未启动，SignalR 连接会静默失败，不影响 WebView2 桥接模式的正常使用。
+
+默认后端地址为 `http://localhost:5000/hub/arm`，可在 [useSignalR.js](src/composables/useSignalR.js) 中修改。
+
+### 数据格式
+
+两种方式使用相同的数据格式：
 
 ```js
-viewer.onArmPoseReceived({
+{
   j0:  0.0,   // 单位：弧度
   j1:  0.1,
   j2:  0.3,
@@ -139,33 +145,8 @@ viewer.onArmPoseReceived({
   j0x: 0.0,   // 底座 XYZ 位移（可选，模型坐标系单位）
   j0y: 0.0,
   j0z: 0.0,
-})
+}
 ```
-
----
-
-## 嵌入 C# WebView2
-
-C# 端发送消息：
-
-```csharp
-// 推送关节角度
-webView.CoreWebView2.PostWebMessageAsString(
-  JsonSerializer.Serialize(new {
-    type = "pose",
-    j0 = 0.0, j1 = 0.1, j2 = 0.3, j3 = 0.0,
-    j4 = 0.0, j5 = 0.0, j6 = 0.0,
-    j0x = 0.0, j0y = 0.0, j0z = 0.0
-  })
-);
-
-// 推送孔洞检测结果
-webView.CoreWebView2.PostWebMessageAsString(
-  JsonSerializer.Serialize(new { type = "holes", data = holeList })
-);
-```
-
-前端接收入口已在 [App.vue](src/App.vue) 的 `window.onCSharpMessage` 中配置好。
 
 ---
 
@@ -175,10 +156,9 @@ webView.CoreWebView2.PostWebMessageAsString(
 
 | 功能 | 说明 |
 |------|------|
-| 骨骼可视化 | 显示骨骼轴向箭头、关节点、2D 标签覆层；骨骼名称与轴向对照表 |
+| 骨骼可视化 | 显示骨骼轴向箭头、关节点、2D 标签覆层；骨骼名称与轴向对照表；棍状骨骼模式 |
 | 关节控制 | j0 ~ j6 数值输入 + ±10° 快捷按钮；j0 额外提供 XYZ 位移输入 |
 | J6 笛卡尔坐标 | 实时显示末端执行器的 X/Y/Z 位置和 Rx/Ry/Rz 旋转（通过骨骼链计算） |
-| 孔洞调试 | 在 J6 末端位置添加调试圆柱体；可调位移、高度、直径、颜色 |
 
 **上线前隐藏：** 在 [RobotViewer.vue](src/components/RobotViewer.vue) 中注释 `<DebugPanel>` 行，或设置 `debug.enabled.value = false`。
 
@@ -201,7 +181,6 @@ dotnet run
 | 接口 | 用途 |
 |------|------|
 | `POST /api/pose` | 接收 7 轴关节坐标 |
-| `POST /api/hole` | 接收孔洞检测数据 |
 | `ws://localhost:5000/hub/arm` | SignalR WebSocket 端点 |
 
 详见 [Back-end Test/README.md](Back-end%20Test/README.md)。
@@ -210,7 +189,7 @@ dotnet run
 
 ## 单元测试
 
-项目包含 27 个单元测试用例，覆盖 `useArmController` 和 `useTubeManager` 两个核心 composable。
+项目包含 14 个单元测试用例，覆盖 `useArmController` 核心 composable。
 
 ```bash
 npm test              # 一次性运行
@@ -219,8 +198,7 @@ npm run test:watch    # 持续监听，文件改动自动重跑
 
 | 测试文件 | 用例数 | 覆盖内容 |
 |---------|--------|---------|
-| [useArmController.test.js](tests/useArmController.test.js) | 13 | updatePose 数据合并、boneConfigs 完整性验证、对外 API 结构校验 |
-| [useTubeManager.test.js](tests/useTubeManager.test.js) | 14 | addHoles 批量添加与统计、setHoleStatus 状态切换与 meta 存储、getHoleByInstanceId 查询 |
+| [useArmController.test.js](tests/useArmController.test.js) | 14 | updatePose 数据合并、boneConfigs 完整性验证、对外 API 结构校验 |
 
 测试使用 vitest + THREE.js 轻量 mock（`tests/__mocks__/`），不依赖 WebGL 或 DOM，可在 CI 流水线中运行。
 
