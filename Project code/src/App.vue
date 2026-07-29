@@ -5,7 +5,7 @@
 <script setup>
 import { ref } from 'vue'
 import RobotViewer from './components/RobotViewer.vue'
-import { useSignalR } from './composables/useSignalR.js'
+import { useRobotPolling } from './composables/useRobotPolling.js'
 
 const viewer = ref(null)
 
@@ -26,14 +26,13 @@ window.onCSharpMessage = (jsonStr) => {
 }
 
 /**
- * SignalR 连接入口（方式 B）
- * 后端 .NET 8 API + SignalR Hub 推送关节角度
- * 数据流: PLC → HTTP POST → .NET 8 → SignalR → 前端
+ * REST 轮询入口（方式 B）
+ * 数据流: PLC → HTTP POST → .NET 8 → GET /Robot/position → 前端
  *
- * 如果后端未启动（WebView2 嵌入场景），SignalR 连接会静默失败，
- * 不影响 WebView2 桥接模式的正常使用。两者可同时启用。
+ * 部署到 wwwroot 后使用相对路径自动指向同源后端。
+ * 如果后端未就绪，轮询会静默等待，不影响 WebView2 桥接模式。
  */
-useSignalR((pose) => {
+useRobotPolling((pose) => {
   viewer.value?.onArmPoseReceived(pose)
 })
 </script>

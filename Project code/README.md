@@ -20,7 +20,7 @@ Project code/
 ├── composables/
 │   ├── useSceneManager.js      ← Three.js 场景初始化
 │   ├── useArmController.js     ← 机械臂骨骼驱动 ⚠️ 需改骨骼名
-│   ├── useSignalR.js           ← SignalR 后端连接
+│   ├── useRobotPolling.js      ← REST 轮询后端 API
 │   └── useDebugManager.js      ← 调试面板状态与逻辑
 ├── tests/
 │   ├── useArmController.test.js
@@ -113,21 +113,17 @@ webView.CoreWebView2.PostWebMessageAsString(
 
 前端接收入口在 [App.vue](src/App.vue) 的 `window.onCSharpMessage` 中配置。
 
-### 方式 B：SignalR WebSocket（远程 API）
+### 方式 B：REST 轮询（后端 API）
 
-数据流：`PLC → HTTP POST → .NET 8 API → SignalR → 前端`
+数据流：`PLC → C# 后端 → GET /Robot/position → 前端`
 
-```bash
-# 先启动后端
-cd "Back-end Test"
-dotnet run
-```
+前端部署到后端 `wwwroot` 后，使用相对路径 `/Robot/position` 自动指向同源后端，**无需任何配置**。
 
-然后启动前端 `npm run dev`，前端会自动连接后端 SignalR Hub。
+默认 100ms 间隔轮询（10Hz），满足合同要求的推送频率。
 
-> 如果后端未启动，SignalR 连接会静默失败，不影响 WebView2 桥接模式的正常使用。
+> 如果后端未就绪，轮询会静默等待，不影响 WebView2 桥接模式的正常使用。
 
-默认后端地址为 `http://localhost:5000/hub/arm`，可在 [useSignalR.js](src/composables/useSignalR.js) 中修改。
+API 地址可在 [useRobotPolling.js](src/composables/useRobotPolling.js) 中修改。
 
 ### 数据格式
 
@@ -166,24 +162,24 @@ dotnet run
 
 ---
 
-## 后端服务（仅仅测试可行性）
+## 后端服务
 
-`Back-end Test/` 目录包含 .NET 8 Web API + SignalR Hub 后端代码。
+`Back-end Test/` 目录包含 .NET 8 Web API 后端代码，提供 REST API 供前端轮询和 PLC 数据接入。
 
 ```bash
 cd "Back-end Test"
 dotnet restore
-dotnet run
+dotnet run   # 启动后端，默认 http://localhost:5000
 ```
 
 启动后提供以下接口：
 
-| 接口 | 用途 |
-|------|------|
-| `POST /api/pose` | 接收 7 轴关节坐标 |
-| `ws://localhost:5000/hub/arm` | SignalR WebSocket 端点 |
+| 接口 | 方法 | 用途 |
+|------|------|------|
+| `/Robot/position` | GET | 获取当前关节坐标（前端轮询，100ms 间隔） |
+| `/Robot/position` | POST | 接收 PLC 上位机推送的关节坐标（写入后端内存） |
 
-详见 [Back-end Test/README.md](Back-end%20Test/README.md)。
+详见 [Back-end Test/README.md](Back-end%20Test/README.md) 和 [Frontend-Backend API Contract.md](Frontend-Backend%20API%20Contract.md)。
 
 ---
 
@@ -204,13 +200,24 @@ npm run test:watch    # 持续监听，文件改动自动重跑
 
 ---
 
-## 生产打包
+## 生产打包与部署
 
 ```bash
 npm run build
 ```
 
-产物在 `dist/` 目录。WebView2 加载 `dist/index.html` 即可。
+产物在 `dist/` 目录。
+
+### 部署方式
+
+| 通信模式 | 部署操作 |
+|----------|----------|
+| **方式 A (WebView2)** | 将 `dist/` 内所有文件拷贝到桌面程序资源路径，WebView2 加载 `dist/index.html` |
+| **方式 B (REST 轮询)** | 将 `dist/` 内所有文件拷贝到后端 `wwwroot/` 目录（如 `D:\InnerSightMaster\webapi\wwwroot\`），浏览器访问 `http://localhost:5000/` 即可 |
+
+> `vite.config.js` 已配置 `base: './'`，构建产物使用相对路径，可部署到任意子目录。
+> 
+> `useRobotPolling.js` 使用相对路径 `/Robot/position`，部署到 `wwwroot` 后自动指向同源后端，无需额外配置。
 
 ---
 

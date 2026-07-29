@@ -7,6 +7,6 @@ export default defineConfig({
   resolve: {
     alias: { '@': resolve(__dirname, 'src') },
   },
-  // 嵌入 WebView2 时可能需要调整 base 路径
-  // base: './',
+  // 部署到后端 wwwroot 时使用相对路径，确保资源在任何子目录下都能正确加载
+  base: './',
 })
