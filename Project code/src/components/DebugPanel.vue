@@ -68,6 +68,7 @@
                 X<input class="j0-pos-input" type="number" step="0.01" v-model.number="debug.jointForm.j0x" @change="debug.applyJointForm()">
                 Y<input class="j0-pos-input" type="number" step="0.01" v-model.number="debug.jointForm.j0y" @change="debug.applyJointForm()">
                 Z<input class="j0-pos-input" type="number" step="0.01" v-model.number="debug.jointForm.j0z" @change="debug.applyJointForm()">
+                <span class="j0-pos-unit">mm</span>
               </span>
             </div>
 

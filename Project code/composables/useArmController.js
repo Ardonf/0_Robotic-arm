@@ -50,6 +50,13 @@ const BASE_POS_AXIS = {
   z: { sign:  1 },
 }
 
+// ┌─────────────────────────────────────────────────────────────────────┐
+// │  单位换算：PLC 返回的底座位移单位是毫米 (mm)                          │
+// │  glTF 场景单位是米 (m)，1 m = 1000 mm，因此 mm → m 除以 1000         │
+// │  实测本模型包围盒约 2.09 单位（≈2.09 米），确认场景单位为米           │
+// └─────────────────────────────────────────────────────────────────────┘
+const MM_TO_UNIT = 1 / 1000
+
 export function useArmController(scene) {
   const bones        = shallowRef({})  // 骨骼引用映射
   const armModel     = shallowRef(null) // 模型根节点引用（供调试面板隐藏网格体用）
@@ -121,15 +128,15 @@ export function useArmController(scene) {
    * 接收 SignalR 推送的关节角度（程序员调用此函数）
    * @param {Object} pose - { j0, j1, j2, j3, j4, j5, j6, j0x, j0y, j0z } 单位：弧度
    *   j0 ~ j6: 各关节旋转角度（弧度）
-   *   j0x/j0y/j0z: 底座 XYZ 位移（模型坐标系单位），可选
+   *   j0x/j0y/j0z: 底座 XYZ 位移（单位：毫米），内部自动换算为场景单位
    */
   function updatePose(pose) {
     Object.assign(targetPose.value, pose)
 
-    // 提取底座位移值并写入 targetPos
-    if (pose.j0x !== undefined) targetPos.value.x = pose.j0x
-    if (pose.j0y !== undefined) targetPos.value.y = pose.j0y
-    if (pose.j0z !== undefined) targetPos.value.z = pose.j0z
+    // 提取底座位移值并写入 targetPos（单位：毫米 → 场景单位米，除以 1000）
+    if (pose.j0x !== undefined) targetPos.value.x = pose.j0x * MM_TO_UNIT
+    if (pose.j0y !== undefined) targetPos.value.y = pose.j0y * MM_TO_UNIT
+    if (pose.j0z !== undefined) targetPos.value.z = pose.j0z * MM_TO_UNIT
   }
 
   /**
