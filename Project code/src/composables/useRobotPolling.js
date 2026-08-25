@@ -45,13 +45,10 @@ export function useRobotPolling(onArmPose) {
 
       const data = await res.json()
 
-      // ┌─────────────────────────────────────────────────────────────┐
-      // │ 🔧 根据后端实际返回的 JSON 结构适配字段名                      │
-      // │   如果后端返回 PascalCase (C# 默认): { "J1": 0.5, ... }      │
-      // │   如果后端返回 camelCase:         { "j1": 0.5, ... }        │
-      // │   当前默认：后端返回 camelCase                                │
-      // └─────────────────────────────────────────────────────────────┘
-      onArmPose(data)
+      // 后端统一包装结构：{ status, message, data: { j0..j6, j0x..j0z } }
+      // 解包出真正的关节数据再交给上层；兼容裸数据 { j0..j6 } 的情况
+      const payload = data?.data ?? data
+      onArmPose(payload)
 
       // 成功后恢复默认间隔
       retryInterval = POLL_INTERVAL
