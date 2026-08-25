@@ -56,13 +56,16 @@
 
           <!-- ══════════════════ 关节控制 ═══════════════════ -->
           <fieldset class="panel-section">
-            <legend>关节控制 (弧度)</legend>
+            <legend>关节控制 ({{ angleUnit === 'rad' ? '弧度' : '角度' }})</legend>
 
             <!-- j0 特殊行（含 XYZ 位移） -->
             <div class="joint-row j0-row">
               <span class="joint-label">j0</span>
               <button class="btn-deg" @click="debug.addJointAngle('j0', -10)">−10°</button>
-              <input class="joint-input" type="number" step="0.01" v-model.number="debug.jointForm.j0" @change="debug.applyJointForm()">
+              <input class="joint-input" type="number" :step="angleUnit === 'deg' ? 1 : 0.01"
+                :value="fmtJointInput(debug.jointForm.j0)"
+                @input="onJointInput('j0', $event)"
+                @change="onJointChange('j0')">
               <button class="btn-deg" @click="debug.addJointAngle('j0', 10)">+10°</button>
               <span class="j0-pos">
                 X<input class="j0-pos-input" type="number" step="0.01" v-model.number="debug.jointForm.j0x" @change="debug.applyJointForm()">
@@ -75,13 +78,17 @@
             <div class="joint-row" v-for="key in debug.JOINT_KEYS.filter(k => k !== 'j0')" :key="key">
               <span class="joint-label">{{ key }}</span>
               <button class="btn-deg" @click="debug.addJointAngle(key, -10)">−10°</button>
-              <input class="joint-input" type="number" step="0.01" v-model.number="debug.jointForm[key]" @change="debug.applyJointForm()">
+              <input class="joint-input" type="number" :step="angleUnit === 'deg' ? 1 : 0.01"
+                :value="fmtJointInput(debug.jointForm[key])"
+                @input="onJointInput(key, $event)"
+                @change="onJointChange(key)">
               <button class="btn-deg" @click="debug.addJointAngle(key, 10)">+10°</button>
             </div>
 
             <div class="joint-actions">
               <button class="btn-sm" @click="debug.applyJointForm()">应用</button>
               <button class="btn-sm btn-reset" @click="debug.resetJointForm()">重置</button>
+              <button class="btn-sm btn-unit" @click="toggleAngleUnit()">{{ angleUnit === 'rad' ? '弧度' : '角度' }}</button>
             </div>
           </fieldset>
 
@@ -128,6 +135,30 @@ const props = defineProps({
 
 // ─── 面板折叠 ────────────────────────────────────────────────────────
 const open = ref(true)
+
+// ─── 角度单位切换（弧度 / 角度） ─────────────────────────────────────
+const angleUnit = ref('rad')
+
+function toggleAngleUnit() {
+  angleUnit.value = angleUnit.value === 'rad' ? 'deg' : 'rad'
+}
+// 内部 jointForm 始终存弧度；显示时按当前单位转换
+function fmtJointInput(rad) {
+  return angleUnit.value === 'deg' ? rad * 180 / Math.PI : rad
+}
+// 用户输入按当前单位解析，统一转回弧度写入 jointForm
+function parseJointInput(v) {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return null
+  return angleUnit.value === 'deg' ? n * Math.PI / 180 : n
+}
+function onJointInput(key, e) {
+  const rad = parseJointInput(e.target.value)
+  if (rad !== null) props.debug.jointForm[key] = rad
+}
+function onJointChange(key) {
+  props.debug.applyJointForm()
+}
 
 // ─── J6 坐标读取 ─────────────────────────────────────────────────────
 const j6 = computed(() => {
@@ -366,6 +397,8 @@ onUnmounted(() => {
 .btn-sm:hover { background: rgba(255,255,255,0.12); color: #ccc; }
 .btn-reset { color: #D85A30; border-color: #3a1a1a; }
 .btn-reset:hover { background: rgba(216,90,48,0.15); }
+.btn-unit { color: #1D9E75; border-color: #12332a; }
+.btn-unit:hover { background: rgba(29,158,117,0.15); }
 
 /* ── J6 笛卡尔坐标 ──────────────────────────────────────────────── */
 .cartesian-grid {
