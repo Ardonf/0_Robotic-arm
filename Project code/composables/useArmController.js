@@ -34,10 +34,10 @@ const BONE_AXIS = {
   j0: { axis: 'y', sign:  1 },
   j1: { axis: 'y', sign:  1 },
   j2: { axis: 'y', sign:  1 },
-  j3: { axis: 'x', sign:  -1 },
-  j4: { axis: 'x', sign:  1 },
-  j5: { axis: 'x', sign:  1 },
-  j6: { axis: 'x', sign:  1 },
+  j3: { axis: 'y', sign:  -1 },
+  j4: { axis: 'y', sign:  1 },
+  j5: { axis: 'y', sign:  1 },
+  j6: { axis: 'y', sign:  1 },
 }
 
 // ┌─────────────────────────────────────────────────────────────────────┐
