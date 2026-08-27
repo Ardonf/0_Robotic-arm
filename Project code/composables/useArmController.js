@@ -35,7 +35,7 @@ const BONE_AXIS = {
   j1: { axis: 'y', sign:  1 },
   j2: { axis: 'y', sign:  1 },
   j3: { axis: 'y', sign:  -1 },
-  j4: { axis: 'y', sign:  1 },
+  j4: { axis: 'y', sign:  -1 },
   j5: { axis: 'y', sign:  1 },
   j6: { axis: 'y', sign:  1 },
 }
@@ -59,6 +59,7 @@ const MM_TO_UNIT = 1 / 1000
 
 export function useArmController(scene) {
   const bones        = shallowRef({})  // 骨骼引用映射
+  const restQuats    = {}              // 各骨骼静止四元数（叠加关节旋转用，避免覆盖静止位姿）
   const armModel     = shallowRef(null) // 模型根节点引用（供调试面板隐藏网格体用）
   const targetPose   = shallowRef({ j0:0, j1:0, j2:0, j3:0, j4:0, j5:0, j6:0 })
   const currentPose  = { j0:0, j1:0, j2:0, j3:0, j4:0, j5:0, j6:0 }
@@ -69,6 +70,14 @@ export function useArmController(scene) {
 
   // 插值平滑系数（0=不插值直接跳变, 1=完全不动; 推荐 0.12~0.2）
   const LERP_FACTOR = 0.15
+
+  // 关节旋转轴方向（骨骼局部坐标系，与 BONE_AXIS 的 axis 对应）
+  const JOINT_AXIS_VEC = {
+    x: new THREE.Vector3(1, 0, 0),
+    y: new THREE.Vector3(0, 1, 0),
+    z: new THREE.Vector3(0, 0, 1),
+  }
+  const _deltaQuat = new THREE.Quaternion() // 增量旋转临时变量
 
   /**
    * 加载 glTF 模型
@@ -95,6 +104,13 @@ export function useArmController(scene) {
             }
           })
           bones.value = found
+
+          // ── 保存每根骨骼的静止四元数 ─────────────────────────────
+          // 后续每帧把关节增量旋转乘在静止旋转之上，保证 joints=0 时
+          // 显示的就是 glb 原始静止位姿（不会丢失 Blender 里调的骨骼拧转）
+          Object.entries(found).forEach(([key, bone]) => {
+            restQuats[key] = bone.quaternion.clone()
+          })
 
           // ── 提示未匹配的骨骼（开发时排查用） ──────────────────────
           Object.entries(BONE_NAMES).forEach(([key, name]) => {
@@ -160,7 +176,12 @@ export function useArmController(scene) {
           targetPose.value[key] * sign,
           LERP_FACTOR
         )
-        bone.rotation[axis] = currentPose[key]
+
+        // 将关节角作为"绕骨骼自身局部轴的增量旋转"，叠加在静止四元数之上。
+        // 不能直接写 bone.rotation[axis]，否则会覆盖静止欧拉角的该分量，
+        // 导致 joints=0 时也偏离 glb 原始静止位姿（丢失 Blender 里的骨骼拧转）。
+        _deltaQuat.setFromAxisAngle(JOINT_AXIS_VEC[axis], currentPose[key])
+        bone.quaternion.copy(restQuats[key]).multiply(_deltaQuat)
       })
 
       // ── j0 底座 XYZ 位移插值 ─────────────────────────────────────
